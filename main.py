@@ -1,8 +1,13 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Any, Dict
 
-app = FastAPI()
+from database import create_document
+from schemas import Inquiry
+
+app = FastAPI(title="East Grinstead B&B API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -14,16 +19,16 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"message": "Hello from FastAPI Backend!"}
+    return {"message": "East Grinstead B&B Backend Running"}
 
 @app.get("/api/hello")
 def hello():
-    return {"message": "Hello from the backend API!"}
+    return {"message": "Welcome to the East Grinstead B&B API"}
 
 @app.get("/test")
 def test_database():
     """Test endpoint to check if database is available and accessible"""
-    response = {
+    response: Dict[str, Any] = {
         "backend": "✅ Running",
         "database": "❌ Not Available",
         "database_url": None,
@@ -31,38 +36,54 @@ def test_database():
         "connection_status": "Not Connected",
         "collections": []
     }
-    
+
     try:
-        # Try to import database module
         from database import db
-        
         if db is not None:
             response["database"] = "✅ Available"
             response["database_url"] = "✅ Configured"
             response["database_name"] = db.name if hasattr(db, 'name') else "✅ Connected"
             response["connection_status"] = "Connected"
-            
-            # Try to list collections to verify connectivity
             try:
                 collections = db.list_collection_names()
-                response["collections"] = collections[:10]  # Show first 10 collections
+                response["collections"] = collections[:10]
                 response["database"] = "✅ Connected & Working"
             except Exception as e:
                 response["database"] = f"⚠️  Connected but Error: {str(e)[:50]}"
         else:
             response["database"] = "⚠️  Available but not initialized"
-            
     except ImportError:
         response["database"] = "❌ Database module not found (run enable-database first)"
     except Exception as e:
         response["database"] = f"❌ Error: {str(e)[:50]}"
-    
-    # Check environment variables
-    import os
+
     response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
     response["database_name"] = "✅ Set" if os.getenv("DATABASE_NAME") else "❌ Not Set"
-    
     return response
+
+# Public endpoint to accept enquiries/booking requests
+@app.post("/api/inquiries")
+def create_inquiry(inquiry: Inquiry):
+    try:
+        inquiry_id = create_document("inquiry", inquiry)
+        return {"status": "ok", "id": inquiry_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Expose schemas so tooling and admin views can discover them
+class SchemaResponse(BaseModel):
+    schemas: Dict[str, Any]
+
+@app.get("/schema")
+def get_schema():
+    from schemas import Inquiry, User, Product
+    return {
+        "schemas": {
+            "inquiry": Inquiry.model_json_schema(),
+            "user": User.model_json_schema(),
+            "product": Product.model_json_schema(),
+        }
+    }
 
 
 if __name__ == "__main__":
